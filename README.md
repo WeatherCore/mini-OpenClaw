@@ -164,39 +164,67 @@ POST /compress → DeepSeek 把前 50% 压缩为 ≤500 字摘要
 
 | 组件 | 版本 | 说明 |
 |---|---|---|
-| Python | 3.10+ | 后端（强制 Type Hinting） |
+| Python | 3.12.7 | 后端（强制 Type Hinting） |
 | Node.js | 18+ | 前端 |
 | DeepSeek API Key | — | 对话必需 |
-| OpenAI 兼容 Key | 可选 | 仅 RAG 模式需要（Embedding） |
+| DASHSCOPE 兼容 Key | 可选 | 仅 RAG 模式需要（Embedding） |
 
-### 1️⃣ 启动后端（端口 8002）
+### 1️⃣ 安装依赖
+
+前后端依赖互相独立，**开两个终端分别执行**，都跑完再进行下一步。
+
+**终端 A — 后端**（`requirements.txt` 在仓库根目录）：
+
+```bash
+# 在仓库根目录创建虚拟环境并安装依赖
+py -3.12 -m venv .venv
+.venv\Scripts\activate                # Windows；macOS/Linux: source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+> ⚠️ **请用 `python -m pip` 而非裸 `pip`** —— 前者把 pip 绑定到当前解释器，即使 PATH 里存在多个 Python（Anaconda / 系统 / Store 版）也绝不会装错环境。裸 `pip` 依赖 `activate` 成功改了 PATH，一旦没生效就会**静默装进全局环境**，不报错。
+
+**终端 B — 前端**：
+
+```bash
+cd frontend
+npm install
+```
+
+> 💡 依赖只需装一次；后续重启直接跳到第 3、4 步。`npm install` 较慢时可以先启动后端。
+
+### 2️⃣ 配置环境变量
+
+在 `backend/` 下创建 `.env`（可从 `.env.example` 复制），**最少填一行**：
+
+```bash
+DEEPSEEK_API_KEY=sk-xxx
+```
+
+完整变量表见下方 [🔑 环境变量一览](#-环境变量一览backendenv)。
+
+### 3️⃣ 启动后端（端口 8002）
 
 ```bash
 cd backend
-
-python -m venv .venv
-.venv\Scripts\activate        # Windows；macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-
-# 在 backend/ 下创建 .env（参考 .env.example），至少填入：
-#   DEEPSEEK_API_KEY=sk-xxx
-
+../.venv/Scripts/activate              # 激活第 1 步在根目录建的虚拟环境
 uvicorn app:app --host 0.0.0.0 --port 8002 --reload
 ```
 
 看到 `✅ mini OpenClaw backend ready` 即成功。
 
-### 2️⃣ 启动前端（端口 3000）
+> 🔍 确认装对了地方：`python -c "import fastapi, langchain; print('✅ 依赖正常')"` —— 在**已激活**的终端里执行。报 `ModuleNotFoundError` 说明环境没对，别急着排查代码。
+
+### 4️⃣ 启动前端（端口 3000）
 
 ```bash
 cd frontend
-npm install
 npm run dev
-
-# 打开 http://localhost:3000
 ```
 
-### 3️⃣ 体验核心链路
+打开 http://localhost:3000 即可使用。
+
+### 5️⃣ 体验核心链路
 
 1. 输入「查询北京天气」→ 观察思考链出现 `read_file`（读技能）→ `fetch_url` / `python_repl`（执行）；
 2. 工具结束后**新气泡**开始打字机输出（`new_response` 分段机制）；
@@ -214,6 +242,7 @@ npm run dev
 | `OPENAI_API_KEY` | RAG 模式 | — | Embedding 向量化密钥 |
 | `OPENAI_BASE_URL` | — | `https://ai.devtool.tech/proxy/v1` | Embedding 服务地址 |
 | `EMBEDDING_MODEL` | — | `text-embedding-3-small` | 向量模型 |
+| `OPENWEATHER_API_KEY` | 天气技能 | — | `get_weather_open` 技能调用所需 |
 
 > 💡 最低可用配置只需一个 `DEEPSEEK_API_KEY` —— RAG 检索、天气技能均可后置开启。
 
@@ -301,7 +330,7 @@ description: 一句话说清触发场景 —— Agent 靠它判断何时匹配�
 - [x] Instruction-following 技能系统（扫描 / 快照 / read_file 学习）
 - [x] 记忆双模式（全文注入 ⇄ RAG 向量检索，MD5 变更检测）
 - [x] 对话压缩归档 + Token 统计 + AI 自动命名
-- [ ] BM25 + 向量混合检索（对齐 PRD，当前为向量检索）
+- [ ] BM25 + 向量混合检索（对齐 PRD，当前为向量检索；实现时建议用纯 Python 的 `rank_bm25` 避开 pystemmer 编译问题）
 - [ ] 同 session 并发写保护（文件锁 / 数据库迁移）
 - [ ] 多模型路由（按任务自动切换模型）
 - [ ] 记忆自动反思与整理调度
