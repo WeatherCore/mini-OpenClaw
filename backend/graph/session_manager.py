@@ -445,19 +445,19 @@ class SessionManager:
     #      让 LLM 保留之前被压缩的上下文（"以下是之前对话的摘要"前缀让 LLM 识别这是历史摘要）。
     # 还有一个隐藏处理：strip 掉 tool_calls 字段——LLM 上下文不需要工具调用记录（那是 Agent 内部状态）。
     def load_session_for_agent(self, session_id: str) -> list[dict[str, Any]]:
-        """Load session history merged for LLM context.
+        """Load session history for LLM context.
 
-        Since we now save multiple consecutive assistant messages per turn,
-        this method combines them back into single assistant messages to
-        maintain proper user/assistant alternation for the LLM.
+        Standard tool protocol: returns raw messages with tool_calls intact.
+        _build_messages downstream splits each assistant's tool_calls into
+        AIMessage(tool_calls=[name/args/id]) + per-tool ToolMessage(output),
+        so the LLM sees the full tool call + result history across turns.
 
-        If compressed_context exists, inserts it at the head as a system
-        message so the LLM retains prior context.
+        compressed_context (if any) is injected at the head as a system
+        message so the LLM retains prior (compressed) context.
         """
 
-        # 这是 SessionManager 的"双重加工"方法——既要"反分段"（合并连续 assistant），
-        # 又要"前置摘要注入"（compressed_context 作为首条 system）。两者结合后产出的
-        # 消息序列可直接喂 LLM，调用方无需任何后处理。agent.py 每轮对话调一次此方法。
+        # 轻量加工方法——只做"前置摘要注入"（compressed_context 作为首条 system），
+        # 原始消息原样拼接（保留 tool_calls）。agent.py 每轮对话调一次此方法。
         # 注意：本方法不写盘——只读 + 内存加工。副作用零，可重复调用。
 
         # 读取会话
@@ -481,21 +481,12 @@ class SessionManager:
                 "content": f"[以下是之前对话的摘要]\n{compressed}",
             })
 
-        # 遍历原始消息，合并连续 assistant 消息
-        for msg in messages:
-            # 判断条件：merged列表不为空，并且【上一条消息是assistant】，【当前这条msg也还是assistant】
-            # 三个同时满足 = 连续两条 assistant
-            # 只要一轮对话里 Agent 调用了工具，磁盘上就必然出现连续 assistant 消息
-            if (
-                merged
-                and merged[-1]["role"] == "assistant"
-                and msg["role"] == "assistant"
-            ):
-                # 用 \n 拼接多条 assistant 消息内容——LLM 看到的是一条完整的 assistant 回复
-                merged[-1]["content"] += "\n" + msg["content"]
-            else:
-                # 非 assistant 连续场景：新起一条消息；只保留 role + content，丢 tool_calls（LLM 不需要）
-                merged.append({"role": msg["role"], "content": msg["content"]})  # 新起一条消息（不含 tool_calls）
+        # 原始消息原样拼接（保留 tool_calls 字段）。
+        # 不再合并连续 assistant、不再 strip tool_calls——_build_messages 已改成标准协议：
+        # assistant 的 tool_calls 拆成 AIMessage(只含 name/args/id) + 独立 ToolMessage(output)，
+        # 连续 assistant 之间夹 ToolMessage，不再是裸连续同 role，无需合并；
+        # tool_calls 保留让跨轮历史里工具调用 + 结果 LLM 都看得到（否则工具结果失忆）。
+        merged.extend(messages)
 
         # 返回可直接喂 LLM 的消息序列
         return merged  
